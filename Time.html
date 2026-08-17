@@ -1,0 +1,456 @@
+<title>時鐘</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --on: #d9480f;
+    --off: #f3f3f3;
+    --idle: #c9c1b3;
+    --idle-hover: #a89d8c;
+    --ring: rgba(217, 72, 15, 0.4);
+    --pitch: 10px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #191919;
+      --on: #ffa94d;
+      --off: #222222;
+      --idle: #5c5044;
+      --idle-hover: #7a6a56;
+      --ring: rgba(255, 169, 77, 0.45);
+    }
+  }
+
+  :root[data-theme="light"] {
+    --bg: #ffffff;
+    --on: #d9480f;
+    --off: #f3f3f3;
+    --idle: #c9c1b3;
+    --idle-hover: #a89d8c;
+    --ring: rgba(217, 72, 15, 0.4);
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #191919;
+    --on: #ffa94d;
+    --off: #222222;
+    --idle: #5c5044;
+    --idle-hover: #7a6a56;
+    --ring: rgba(255, 169, 77, 0.45);
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    position: relative;
+    background: var(--bg);
+  }
+
+  #field {
+    position: absolute;
+    inset: 0;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .toggle {
+    /* clamped copy of --pitch just for this control — never shrinks below a usable
+       size, and never grows past a sensible cap, regardless of how small/large the
+       dot grid itself gets */
+    --tp: clamp(0.62rem, var(--pitch), 1.9rem);
+    --pad: calc(var(--tp) * 0.2);
+    --knob: calc(var(--tp) * 1.1);
+    position: absolute;
+    bottom: calc(var(--tp) * 1.5);
+    left: calc(var(--tp) * 1.5);
+    width: calc(var(--tp) * 3);
+    height: calc(var(--tp) * 1.5);
+    padding: 0;
+    border: none;
+    border-radius: calc(var(--tp) * 0.4);
+    background: var(--idle);
+    box-shadow: inset 0 1.5px 3px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    z-index: 2;
+    transition: background-color 0.15s ease;
+  }
+
+  .toggle::before {
+    content: "";
+    position: absolute;
+    inset: calc(var(--tp) * -1);
+  }
+
+  .toggle:hover {
+    background: var(--idle-hover);
+  }
+
+  .toggle:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  .toggle .mini {
+    position: absolute;
+    top: 50%;
+    width: calc(var(--knob) * 0.5);
+    height: calc(var(--knob) * 0.5);
+    transform: translateY(-50%);
+    color: var(--bg);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+
+  .toggle .mini.sun-mini {
+    left: calc(var(--pad) * 2.6);
+  }
+
+  .toggle .mini.moon-mini {
+    right: calc(var(--pad) * 2.6);
+  }
+
+  .toggle .knob {
+    position: absolute;
+    top: 50%;
+    left: var(--pad);
+    width: var(--knob);
+    height: var(--knob);
+    border-radius: calc(var(--knob) * 0.28);
+    background-color: var(--on);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    transform: translateY(-50%);
+    transition: left 0.2s ease, background-color 0.15s ease;
+  }
+
+  :root[data-theme="dark"] .toggle .knob {
+    left: calc(100% - var(--knob) - var(--pad));
+  }
+</style>
+
+<body>
+  <div id="field">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <button class="toggle" id="themeToggle" type="button" role="switch" aria-checked="false" aria-label="切換淺色／深色模式">
+    <svg class="mini sun-mini" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+      <circle cx="12" cy="12" r="4.2" />
+      <path d="M12 2.5v2.4M12 19.1v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7" />
+    </svg>
+    <svg class="mini moon-mini" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 14.2A8.5 8.5 0 1 1 9.8 4a6.8 6.8 0 0 0 10.2 10.2z" />
+    </svg>
+    <span class="knob"></span>
+  </button>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var toggle = document.getElementById("themeToggle");
+      var STORAGE_KEY = "clock-theme";
+
+      function applyTheme(mode) {
+        if (mode === "light" || mode === "dark") {
+          root.setAttribute("data-theme", mode);
+        } else {
+          root.removeAttribute("data-theme");
+        }
+      }
+
+      function currentEffectiveTheme() {
+        var stored = root.getAttribute("data-theme");
+        if (stored) return stored;
+        return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+
+      var savedTheme = null;
+      try {
+        savedTheme = localStorage.getItem(STORAGE_KEY);
+      } catch (e) {}
+      applyTheme(savedTheme);
+
+      // ---- 5x7 dot-matrix digit font (1 = lit) ----
+      var DIGITS = {
+        "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+        "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+        "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+        "3": ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
+        "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+        "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+        "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+        "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+        "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+        "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"]
+      };
+      var COLON = ["00", "00", "10", "00", "10", "00", "00"];
+      var GLYPH_ROWS = 7;
+
+      // h0 h1 : m0 m1  (1-col spacer between each)
+      var LAYOUT = ["h0", "h1", "colon", "m0", "m1"];
+      var CHAR_W = { h0: 5, h1: 5, colon: 2, m0: 5, m1: 5 };
+      var GLYPH_COLS = (function () {
+        var w = 0;
+        for (var i = 0; i < LAYOUT.length; i++) {
+          if (i > 0) w += 1;
+          w += CHAR_W[LAYOUT[i]];
+        }
+        return w;
+      })();
+      var field = document.getElementById("field");
+      var canvas = document.getElementById("canvas");
+      var ctx = canvas.getContext("2d");
+
+      function readColors() {
+        var cs = getComputedStyle(root);
+        return {
+          bg: cs.getPropertyValue("--bg").trim(),
+          on: cs.getPropertyValue("--on").trim(),
+          off: cs.getPropertyValue("--off").trim()
+        };
+      }
+      var colors = readColors();
+      function refreshColors() {
+        colors = readColors();
+      }
+
+      var grid = { rows: 0, cols: 0, offRow: 0, offCol: 0, tickRow: 0, tickCol: 0, pitch: 0, dpr: 1 };
+
+      function measure() {
+        var w = field.clientWidth;
+        var h = field.clientHeight;
+        if (w < 10 || h < 10) return false;
+
+        // fill the whole field with dots — pitch derived from available space, then
+        // rows/cols computed with floor() so the block never exceeds the container
+        var safety = 6;
+        var usableW = w - safety * 2;
+        var usableH = h - safety * 2;
+        var pitch = usableH / 17;
+        var minPitchForWidth = usableW / (GLYPH_COLS + 8);
+        pitch = Math.min(pitch, minPitchForWidth);
+        pitch = Math.max(0.5, Math.min(pitch, 22));
+
+        var rows = Math.max(GLYPH_ROWS + 4, Math.floor(usableH / pitch));
+        var cols = Math.max(GLYPH_COLS + 4, Math.floor(usableW / pitch));
+
+        grid.pitch = pitch;
+        grid.rows = rows;
+        grid.cols = cols;
+        grid.offRow = Math.floor((rows - GLYPH_ROWS) / 2);
+        grid.offCol = Math.floor((cols - GLYPH_COLS) / 2);
+        // same row as the glyph, one column after "分" — a fixed grid offset that
+        // never depends on which digits are actually showing
+        grid.tickRow = grid.offRow + GLYPH_ROWS - 1;
+        grid.tickCol = grid.offCol + GLYPH_COLS + 1;
+
+        root.style.setProperty("--pitch", pitch + "px");
+
+        var dpr = Math.min(window.devicePixelRatio || 1, 2);
+        grid.dpr = dpr;
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+        canvas.style.width = w + "px";
+        canvas.style.height = h + "px";
+        return true;
+      }
+
+      function pad(n) {
+        return n < 10 ? "0" + n : "" + n;
+      }
+
+      function draw() {
+        if (!grid.rows) return;
+        var pitch = grid.pitch;
+        var dpr = grid.dpr;
+        var totalW = grid.cols * pitch;
+        var totalH = grid.rows * pitch;
+        var startX = (field.clientWidth - totalW) / 2;
+        var startY = (field.clientHeight - totalH) / 2;
+        var r = pitch * 0.4;
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, field.clientWidth, field.clientHeight);
+        ctx.fillStyle = colors.bg;
+        ctx.fillRect(0, 0, field.clientWidth, field.clientHeight);
+
+        var now = new Date();
+        var hh = pad(now.getHours());
+        var mm = pad(now.getMinutes());
+        var glyphs = {
+          h0: DIGITS[hh[0]],
+          h1: DIGITS[hh[1]],
+          colon: COLON,
+          m0: DIGITS[mm[0]],
+          m1: DIGITS[mm[1]]
+        };
+
+        var lit = {};
+        var col = grid.offCol;
+        for (var i = 0; i < LAYOUT.length; i++) {
+          var key = LAYOUT[i];
+          var pattern = glyphs[key];
+          var w = CHAR_W[key];
+          for (var gr = 0; gr < GLYPH_ROWS; gr++) {
+            var row = pattern[gr];
+            for (var gc = 0; gc < w; gc++) {
+              if (row[gc] === "1") lit[(grid.offRow + gr) + "_" + (col + gc)] = true;
+            }
+          }
+          col += w + 1;
+        }
+        var tickOn = now.getSeconds() % 2 === 0;
+        var tickKey = grid.tickRow + "_" + grid.tickCol;
+        if (tickOn) lit[tickKey] = true;
+
+        // carve out a gap where the physical toggle switch sits
+        var toggleRect = toggle.getBoundingClientRect();
+        var fieldRect = field.getBoundingClientRect();
+        var gapPad = pitch * 0.55;
+        var gap = {
+          x: toggleRect.left - fieldRect.left - gapPad,
+          y: toggleRect.top - fieldRect.top - gapPad,
+          w: toggleRect.width + gapPad * 2,
+          h: toggleRect.height + gapPad * 2
+        };
+        function inGap(cx, cy) {
+          return cx >= gap.x && cx <= gap.x + gap.w && cy >= gap.y && cy <= gap.y + gap.h;
+        }
+
+        // off dots first, single fast pass
+        ctx.fillStyle = colors.off;
+        ctx.beginPath();
+        for (var rr = 0; rr < grid.rows; rr++) {
+          for (var cc = 0; cc < grid.cols; cc++) {
+            if (lit[rr + "_" + cc]) continue;
+            var cx = startX + cc * pitch + pitch / 2;
+            var cy = startY + rr * pitch + pitch / 2;
+            if (inGap(cx, cy)) continue;
+            ctx.moveTo(cx + r, cy);
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          }
+        }
+        ctx.fill();
+
+        // on dots
+        ctx.fillStyle = colors.on;
+        ctx.beginPath();
+        for (var key2 in lit) {
+          var parts = key2.split("_");
+          var rr2 = +parts[0];
+          var cc2 = +parts[1];
+          var cx2 = startX + cc2 * pitch + pitch / 2;
+          var cy2 = startY + rr2 * pitch + pitch / 2;
+          if (inGap(cx2, cy2)) continue;
+          ctx.moveTo(cx2 + r, cy2);
+          ctx.arc(cx2, cy2, r, 0, Math.PI * 2);
+        }
+        ctx.fill();
+      }
+
+      function rebuildAndDraw() {
+        if (measure()) draw();
+      }
+
+      var resizeTimer = null;
+      function scheduleRebuild() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(rebuildAndDraw, 80);
+      }
+
+      if (window.ResizeObserver) {
+        new ResizeObserver(scheduleRebuild).observe(field);
+      } else {
+        window.addEventListener("resize", scheduleRebuild);
+      }
+
+      function syncAriaChecked() {
+        toggle.setAttribute("aria-checked", currentEffectiveTheme() === "dark" ? "true" : "false");
+      }
+      syncAriaChecked();
+
+      function hexToRgb(hex) {
+        hex = hex.replace("#", "");
+        if (hex.length === 3) hex = hex.split("").map(function (c) { return c + c; }).join("");
+        var num = parseInt(hex, 16);
+        return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+      }
+      function rgbToHex(r, g, b) {
+        function h(v) {
+          v = Math.round(Math.max(0, Math.min(255, v)));
+          var s = v.toString(16);
+          return s.length === 1 ? "0" + s : s;
+        }
+        return "#" + h(r) + h(g) + h(b);
+      }
+      function lerp(a, b, t) {
+        return a + (b - a) * t;
+      }
+
+      var themeAnimId = null;
+      function animateThemeChange(fromColors, toColors) {
+        if (themeAnimId) cancelAnimationFrame(themeAnimId);
+        var fromBg = hexToRgb(fromColors.bg), toBg = hexToRgb(toColors.bg);
+        var fromOn = hexToRgb(fromColors.on), toOn = hexToRgb(toColors.on);
+        var fromOff = hexToRgb(fromColors.off), toOff = hexToRgb(toColors.off);
+        var duration = 260;
+        var start = null;
+
+        function step(ts) {
+          if (start === null) start = ts;
+          var t = Math.min(1, (ts - start) / duration);
+          var e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+          colors.bg = rgbToHex(lerp(fromBg[0], toBg[0], e), lerp(fromBg[1], toBg[1], e), lerp(fromBg[2], toBg[2], e));
+          colors.on = rgbToHex(lerp(fromOn[0], toOn[0], e), lerp(fromOn[1], toOn[1], e), lerp(fromOn[2], toOn[2], e));
+          colors.off = rgbToHex(lerp(fromOff[0], toOff[0], e), lerp(fromOff[1], toOff[1], e), lerp(fromOff[2], toOff[2], e));
+          draw();
+          if (t < 1) {
+            themeAnimId = requestAnimationFrame(step);
+          } else {
+            themeAnimId = null;
+            colors = toColors;
+            draw();
+          }
+        }
+        themeAnimId = requestAnimationFrame(step);
+      }
+
+      toggle.addEventListener("click", function () {
+        var fromColors = { bg: colors.bg, on: colors.on, off: colors.off };
+        var next = currentEffectiveTheme() === "dark" ? "light" : "dark";
+        applyTheme(next);
+        try {
+          localStorage.setItem(STORAGE_KEY, next);
+        } catch (e) {}
+        syncAriaChecked();
+        animateThemeChange(fromColors, readColors());
+      });
+
+      var systemQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      systemQuery.addEventListener("change", function () {
+        if (!root.getAttribute("data-theme")) {
+          syncAriaChecked();
+          refreshColors();
+          draw();
+        }
+      });
+
+      refreshColors();
+      rebuildAndDraw();
+      setInterval(draw, 1000);
+    })();
+  </script>
+</body>
